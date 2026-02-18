@@ -297,12 +297,12 @@ class Custom_DataSet_Manager():
 
         
         #takint unique classes and print them
-        unique_sources = dataset.unique("dataset_source")
+        unique_sources = dataset.unique("origin")
         print(f"Detected unique sources: {unique_sources}")
         
         #Encoding data source to number so it can be used in stratification
         dataset = dataset.map(
-                lambda x: {"dataset_source": [s.lower() for s in x["dataset_source"]]},
+                lambda x: {"dataset_source": [s.lower() for s in x["origin"]]},
                 batched=True,
                 desc="dataset_source casing to "
             )
@@ -312,7 +312,7 @@ class Custom_DataSet_Manager():
         source_feature = ClassLabel(names=sorted_names)
         dataset = dataset.cast_column("dataset_source", source_feature)
         
-        print(f"Mapowanie klas : {dataset.features['dataset_source']._str2int}")
+        print(f"Mapowanie klas : {dataset.features['origin']}")
         
         ####
         Data =  dataset.shuffle(seed=self.random_state)
@@ -383,7 +383,10 @@ class Async_DataLoader():
                             for _ in range(num_workers)]
         
         self.image_augmentation = image_augmentation
+        
 
+        self.mean = torch.tensor([0.485, 0.456, 0.406], device=self.device).view(1, 3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225], device=self.device).view(1, 3, 1, 1)
         
 
         
@@ -560,21 +563,19 @@ class Async_DataLoader():
                         
                         # [Image Loading Logic ...] 
                         img = np.array(self.dataset[idx]["image"], dtype=np.float32) / 255.0
+                        caption_list = self.dataset[idx]['captions']
                         
-                        # 2. DODAJ TO: Normalizacja ImageNet
-                        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-                        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-                        
-                        # Operacja na tablicy numpy: (Obraz - Średnia) / Odchylenie
-                        img = (img - mean) / std
+                        caption_positive = random.choice(caption_list)
+                        rand_neg = random.random()
+                        if rand_neg < 0.15:
+                            random_idx = random.randint(0, len(self.dataset) - 1)
+                            caption_negative = random.choice(self.dataset[random_idx]['captions'])
+                        else:    
+                            if random.choice([True, False]):
+                                caption_negative = random.choice(caption_list)
+                            else:
+                                caption_negative = caption_positive
 
-                        # [Caption Selection Logic ...]
-                        if random.random() > 0.8:
-                            caption_positive = self.dataset[idx]['caption']
-                        else:
-                            indexes = [0, 1, 2, 3]
-                            selected = random.sample(indexes, 2)
-                            caption_positive = self.dataset[idx]['caption_aug'][selected[0]]
 
                         # FLIP MAP CREATION
                         if caption_positive:
@@ -593,8 +594,9 @@ class Async_DataLoader():
                         flip_flags.append(can_flip)
 
 
+
                         # --- NEGATIVE SELECTION 
-                        caption_negative, _ = create_slightly_negative_caption(caption_positive)
+                        caption_negative, _ = create_slightly_negative_caption(caption_negative)
                         #caption_negative, succes = create_slightly_negative_caption(caption_positive)
                         #if not succes:
                             #print("Positive:", caption_positive)
@@ -608,8 +610,8 @@ class Async_DataLoader():
                         caption_positive = torch.tensor(caption_positive, dtype=torch.long)
                         
                         # [Origin Logic ...]
-                        origin = self.dataset[idx]['dataset_source']
-                        origin_map = {"mscoco_train2017": 0, "ade20k": 1, "flick30k": 2}
+                        origin = self.dataset[idx]['origin']
+                        origin_map = {"coco": 0, "ade20k": 1, "flickr30k": 2}
                         origin_val = origin_map.get(origin, 3) # Safe get
 
                         # [Buffer Copying ...]
@@ -642,6 +644,15 @@ class Async_DataLoader():
                         aug_images = self._augment_images(original_batch, flip_tensor)
                         batch_dict["image_augmented"] = aug_images
                         
+                    
+
+                    
+                    # Operacja na tablicy numpy: (Obraz - Średnia) / Odchylenie
+                    batch_dict["image_original"] = (batch_dict["image_original"] - self.mean) / self.std
+                    if "image_augmented" in batch_dict:
+                        batch_dict["image_augmented"] = (batch_dict["image_augmented"] - self.mean) / self.std
+
+
 
                     # Push to queue
                     self.queue.put(batch_dict)

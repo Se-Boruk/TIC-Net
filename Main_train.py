@@ -172,8 +172,8 @@ print("Backbone frozen for initial warm-up (Head-only training).")
 
 
 criterion = functions.Custom_loss(margin = LOSS_MARGIN,
-                                  triplet_weight=1.0, 
-                                  contrastive_weight=2.0,
+                                  triplet_weight = 2.0, 
+                                  contrastive_weight = 1.5,
                                   init_temp=0.07
                                   )
 

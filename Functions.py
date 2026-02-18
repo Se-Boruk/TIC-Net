@@ -21,9 +21,9 @@ class Custom_loss(nn.Module):
         # 1. Wyliczamy temperaturę i clampujemy
         with torch.no_grad():
             self.logit_scale.clamp_(0, 4.6052)
-        s = self.logit_scale.exp() 
-        labels = torch.arange(v_main.size(0), device=v_main.device)
 
+        labels = torch.arange(v_main.size(0), device=v_main.device)
+        
         # 2. RZUTOWANIE DO FLOAT32 DLA STABILNOŚCI
         # To jest kluczowe przy FP16 training!
         #v_main = v_main.float()
@@ -32,6 +32,10 @@ class Custom_loss(nn.Module):
         #t_neg = t_neg.float()
         #s = s.float()
 
+        s = self.logit_scale.exp() 
+        v_main, v_aug = v_main.float(), v_aug.float()
+        t_pos, t_neg = t_pos.float(), t_neg.float()
+        
         # =================================================================
         # 1. SYMMETRIC CONTRASTIVE LOSS
         # =================================================================

@@ -146,15 +146,11 @@ def _worker_scan(args):
                 batch_tokens.extend(tokens)
                 batch_lengths.append(len(tokens))
 
-        for text in batch['caption']:
-            process_entry(text)
-        
-        if 'caption_aug' in batch:
-            for aug_list in batch['caption_aug']:
-                if aug_list:
-                    for text in aug_list:
-                        process_entry(text)
-                        
+        for t_list in batch['captions']:
+            if t_list:
+                for text in t_list:
+                    process_entry(text)
+           
         local_word_counts.update(batch_tokens)
         local_len_counts.update(batch_lengths)
         

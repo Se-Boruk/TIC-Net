@@ -15,9 +15,9 @@ TEST_SPLIT = 0.1
 DEFAULT_IMG_SIZE = 224
 
 SOURCE_MAP = {
-              "mscoco_train2017": 0,
+              "coco": 0,
               "ade20k": 1,
-              "flick30k": 2
+              "flickr30k": 2
               }
 
 SPLIT_HASHES = {
@@ -41,10 +41,10 @@ MAX_QUEUE = 10
 LR = 1e-4               #Learning rate... no need to explain
 BASE_FILTERS_CNN = 64   #Base n of filters for the network CNN
 HIDDEN_DIM_LSTM = 512   #Hidden dim of lstm
-VOCAB_SIZE = 8999       #Size of the vocabulary
+VOCAB_SIZE = 14859       #Size of the vocabulary
 TOKEN_DIM = 512         #Length of the token encoding (single token length after processing)
 LATENT_SPACE = 512      #Length of vector models are producing
-SEQUENCE_LENGTH = 128   #Numbers of tokens coming into the text encoder
+SEQUENCE_LENGTH = 96   #Numbers of tokens coming into the text encoder
 
 LSTM_DEPTH = 3
 

@@ -161,10 +161,10 @@ class Siamese_model(nn.Module):
         t_neg = self.txt_enc(neg_cap)
 
         #NORMALIZATION , specifically for the contrastive and triplet loss
-        v_main = F.normalize(v_main, p=2, dim=1, eps=1e-8) # Added eps
-        v_aug  = F.normalize(v_aug, p=2, dim=1, eps=1e-8)
-        t_pos  = F.normalize(t_pos, p=2, dim=1, eps=1e-8)
-        t_neg  = F.normalize(t_neg, p=2, dim=1, eps=1e-8)
+        v_main = F.normalize(v_main, p=2, dim=1, eps=1e-6) # Added eps
+        v_aug  = F.normalize(v_aug, p=2, dim=1, eps=1e-6)
+        t_pos  = F.normalize(t_pos, p=2, dim=1, eps=1e-6)
+        t_neg  = F.normalize(t_neg, p=2, dim=1, eps=1e-6)
 
         return v_main, v_aug, t_pos, t_neg
     
