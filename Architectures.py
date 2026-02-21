@@ -4,74 +4,51 @@ import torch.nn.functional as F
 from torchvision import models
 import os
 
-
-
 class Image_encoder(nn.Module):
     def __init__(self, embed_dim, weights_path="Models/Pretrained/resnet50_weights.pth"):
         super().__init__()
         
-        # 1. Init ResNet50 Backbone
         resnet = models.resnet50(weights=None)
-        
         if os.path.exists(weights_path):
             state_dict = torch.load(weights_path, map_location='cpu', weights_only=True)
             resnet.load_state_dict(state_dict)
-            print(f"Loaded ResNet50 backbone (Offline)")
+            print("Loaded ResNet50 backbone (Offline)")
 
-        # Cut off the original AvgPool and FC
         self.backbone = nn.Sequential(*list(resnet.children())[:-2])
 
-        # 2. SPATIAL NECK (The "Visual Tokenizer")
-        # We transform the 2048x7x7 output into a 512x4x4 grid.
         self.spatial_neck = nn.Sequential(
-            # A. Compress Channels (2048 -> 512)
-            # We keep the semantic richness high to match the LSTM hidden state
             nn.Conv2d(2048, 512, kernel_size=1), 
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.1),
-            
-            # B. Force Spatial Reduction (7x7 -> 4x4)
-            # Adaptive Pooling allows this to work even if input image size changes slightly
             nn.AdaptiveAvgPool2d((4, 4))
         )
         
-        # Calculation: 512 channels * 16 locations = 8192 features
-        flatten_dim = 512 * 4 * 4 
-
-        # 3. DENSE HEAD
-        # Now learns the relationship between these 16 "visual tokens"
-        self.fc = nn.Sequential(
-            nn.Flatten(),
-            
-            nn.Linear(flatten_dim, flatten_dim // 2), # 8192 -> 4096
-            nn.LayerNorm(flatten_dim // 2),
-            nn.LeakyReLU(0.02),
-            nn.Dropout(0.1),
-        
-            nn.Linear(flatten_dim // 2, embed_dim),   # 4096 -> 512
-            nn.LayerNorm(embed_dim)             
+        # Replaces the Dense Head. Projects localized features directly.
+        self.local_proj = nn.Sequential(
+            nn.Linear(512, embed_dim),
+            nn.LayerNorm(embed_dim)
         )
         
     def forward(self, x):
         x = self.backbone(x)        # [B, 2048, 7, 7]
-        x = self.spatial_neck(x)    # [B, 512, 4, 4] -> "16 tokens of dim 512"
-        return self.fc(x)           # [B, embed_dim]
+        x = self.spatial_neck(x)    # [B, 512, 4, 4]
+        
+        B, C, H, W = x.shape
+        x = x.view(B, C, H * W).permute(0, 2, 1) # [B, 16, 512]
+        
+        return self.local_proj(x)   # [B, 16, embed_dim]
 
     def train(self, mode=True):
         super().train(mode)
-        # Keep Backbone BatchNorm frozen
         for module in self.backbone.modules():
             if isinstance(module, nn.BatchNorm2d):
                 module.eval()
-
-
 
 
 class Text_encoder(nn.Module):
     class ResidualLSTM(nn.Module):
         def __init__(self, dim, dropout=0.1):
             super().__init__()
-            # Bi-LSTM: dim // 2 w każdą stronę daje łącznie dim na wyjściu
             self.lstm = nn.LSTM(dim, dim // 2, num_layers=1, 
                                 batch_first=True, bidirectional=True)
             self.norm = nn.LayerNorm(dim)
@@ -81,76 +58,47 @@ class Text_encoder(nn.Module):
             out, _ = self.lstm(x)
             return self.norm(x + self.dropout(out))
 
-    class AttentionPooling(nn.Module):
-        def __init__(self, dim):
-            super().__init__()
-            self.att_weights = nn.Sequential(
-                nn.Linear(dim, dim // 2),
-                nn.Tanh(),
-                nn.Linear(dim // 2, 1)
-            )
-
-        def forward(self, x):
-            # x shape: [Batch, Seq_Len, Dim]
-            weights = self.att_weights(x) # [Batch, Seq_Len, 1]
-            weights = F.softmax(weights, dim=1)
-            
-            # Ważona suma wektorów słów
-            pooled = torch.sum(x * weights, dim=1) # [Batch, Dim]
-            return pooled
-
     def __init__(self, vocab_size, word_dim, hidden_dim, embed_dim, depth=3):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, word_dim, padding_idx=0)
         self.proj = nn.Linear(word_dim, hidden_dim)
         
-        # Redukujemy głębokość do 3 warstw - dla captioningu to zazwyczaj sweet spot
         self.layers = nn.ModuleList([self.ResidualLSTM(hidden_dim) for _ in range(depth)])
         
-        # Nowy moduł agregacji
-        self.attention = self.AttentionPooling(hidden_dim)
-        
-        self.fc = nn.Sequential(
+        # Replaces AttentionPooling. Applied to every token independently.
+        self.token_proj = nn.Sequential(
             nn.Linear(hidden_dim, embed_dim),
-            nn.LayerNorm(embed_dim),    # <--- THE FIX (Safe & Stable)
+            nn.LayerNorm(embed_dim),
             nn.LeakyReLU(0.02),
             nn.Linear(embed_dim, embed_dim)
         )
 
     def forward(self, x):
-        # x: [Batch, Seq_Len]
+        # x shape: [Batch, Seq_Len]
+        # Generate padding mask (assuming 0 is the padding token)
+        mask = (x != 0) 
+        
         x = self.proj(self.embedding(x)) # [Batch, Seq_Len, Hidden]
         
         for layer in self.layers:
             x = layer(x)
         
-        # Zastępujemy torch.max() przez Attention Pooling
-        pooled = self.attention(x)
+        out = self.token_proj(x) # [Batch, Seq_Len, embed_dim]
         
-        return self.fc(pooled)
-
-
-
-
+        return out, mask
+    
+    
 class Siamese_model(nn.Module):
-    """
-    Model which merges 2 models, text and image encoder, and then compares their produced vectors to determine
-    if the text describes the image well, and if there are not any mismatches in the caption
-    """
     def __init__(self, Image_model, Text_model, device):
         super().__init__()
         self.img_enc = Image_model
         self.txt_enc = Text_model
-        
         self.device = device
 
-    def move_to_device(self, device = None):
-        if device is None:
-            self.img_enc.to(self.device)
-            self.txt_enc.to(self.device)
-        else:
-            self.img_enc.to(device)
-            self.txt_enc.to(device)
+    def move_to_device(self, device=None):
+        target = device if device else self.device
+        self.img_enc.to(target)
+        self.txt_enc.to(target)
 
     def train_mode(self):
         self.img_enc.train()
@@ -158,70 +106,43 @@ class Siamese_model(nn.Module):
             
     def eval_mode(self):
         self.img_enc.eval()
-        self.txt_enc.eval()       
-
+        self.txt_enc.eval()        
 
     def forward(self, img, aug_img, pos_cap, neg_cap):
-        """
-        For training, we use here the img and augmented image, also the positive and negative caption
-        """
-        #Visual transformation
-        v_main = self.img_enc(img)
-        v_aug  = self.img_enc(aug_img)
+        # Image extraction -> [B, 16, 512]
+        v_main = F.normalize(self.img_enc(img), p=2, dim=-1, eps=1e-8)
+        v_aug  = F.normalize(self.img_enc(aug_img), p=2, dim=-1, eps=1e-8)
 
-        #Text transformation
-        t_pos = self.txt_enc(pos_cap)
-        t_neg = self.txt_enc(neg_cap)
+        # Text extraction -> [B, L, 512] and masks -> [B, L]
+        t_pos, m_pos = self.txt_enc(pos_cap)
+        t_neg, m_neg = self.txt_enc(neg_cap)
+        
+        t_pos = F.normalize(t_pos, p=2, dim=-1, eps=1e-8)
+        t_neg = F.normalize(t_neg, p=2, dim=-1, eps=1e-8)
 
-        #NORMALIZATION , specifically for the contrastive and triplet loss
-        v_main = F.normalize(v_main, p=2, dim=1, eps=1e-6) # Added eps
-        v_aug  = F.normalize(v_aug, p=2, dim=1, eps=1e-6)
-        t_pos  = F.normalize(t_pos, p=2, dim=1, eps=1e-6)
-        t_neg  = F.normalize(t_neg, p=2, dim=1, eps=1e-6)
+        return v_main, v_aug, t_pos, t_neg, m_pos, m_neg
 
-        return v_main, v_aug, t_pos, t_neg
-    
-    
     def predict(self, img, caption_text, threshold=0.5):
-        """
-        For actual using of the model
-        
-        It returns if the img and caption are the match as well as the similarity score it produced (0-1)
-        """
-        
-        # Switch to evaluation mode
+        """Inference mode: Computes 1-to-1 similarity directly."""
         self.eval_mode()
-        self.eval()
         
         with torch.no_grad():
-            #Text and visual embedding from trained submodels / feature extractors 
-            v_img = self.img_enc(img)
-            t_text = self.txt_enc(caption_text)
+            v_img = F.normalize(self.img_enc(img), p=2, dim=-1, eps=1e-8)
+            t_text, mask = self.txt_enc(caption_text)
+            t_text = F.normalize(t_text, p=2, dim=-1, eps=1e-8)
             
-            #Normalize
-            #The loss was trained on normalized vectors, so prediction must use them too
-            v_img = F.normalize(v_img, p=2, dim=1, eps=1e-8)
-            t_text = F.normalize(t_text, p=2, dim=1, eps=1e-8)
+            # 1-to-1 Cross-Attention logic
+            sim_matrix = torch.bmm(v_img, t_text.transpose(1, 2))
+            word_scores, _ = torch.max(sim_matrix, dim=1)
             
-            #Calculate Cosine Similarity
-            #Dot product of normalized vectors is Cosine Similarity
+            # Mask out padding tokens
+            word_scores = word_scores * mask.float()
+            valid_words = torch.sum(mask.float(), dim=1).clamp(min=1.0)
             
-            #WE got the [batch_size] vector shape at the end - similarity for each of the pair
-            similarity = (v_img * t_text).sum(dim=1)
-            
-            #Applying treshold for each of the similarity to get bool value if its match or not
+            similarity = torch.sum(word_scores, dim=1) / valid_words
             is_match = (similarity > threshold)
             
-            return is_match, similarity    
-    
-    
-
-
-    
-
-    
-    
-    
+            return is_match, similarity 
     
     
     

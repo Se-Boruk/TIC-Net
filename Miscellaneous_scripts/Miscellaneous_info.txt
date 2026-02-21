@@ -1,0 +1,20 @@
+Scripts that has been used only for specifi case debugging, 
+testing or just used once for the whole time of the project (but still important to keep)
+
+Clean_checkpoints.py:
+	Script to clean the pytorch model so it can be loaded with trust_remote_code = False.
+
+Prepare_weights.py:
+	Preparation of the weights for final submission (it was academic project). It cleared all states of the optimizer etc.
+	and left only weights releveant to the model working
+
+ResNet_backbone.py:
+	Download locally the resenet model (so its not somewhere throwed in the PC cache).
+	Resnet was used as backbone for image feature extraction
+
+View_dataset.py:
+	Viewing the test dataset. Testing the pipeline - what the model would get as the input data
+
+Test_tokenizer_cases.py:
+	Testing different cases of text input to the tokenizer. Encoding and decoding.
+	To see it preprocessing, lemmatization works.

@@ -1,0 +1,3 @@
+Old scripts. 
+Representing few of the previous stages of the project. Kept for the organisation of spacework.
+They are in previous versions on git anyway, but still.

@@ -25,7 +25,9 @@ import json
 import Tokenizer_lib as Tok_lib
 from Config import SOURCE_MAP
 from Negative_map import NUMBERS_DICT, CATEGORY_POOLS, STRICT_PAIRS, SHARED_RELATIONS, SHARED_DEFINITIONS
-
+import random
+import spacy
+import pyinflect
 
 # =========================================================
 # INITIALIZATION (Budowanie Indeksów - Uruchamiane raz)
@@ -43,39 +45,6 @@ for pool_name, words in CATEGORY_POOLS.items():
     for w in words:
         WORD_TO_POOL_ID[w] = pool_name
 
-# 3. Reverse Number Map
-NUMBERS_REVERSE = {v: k for k, v in NUMBERS_DICT.items()}
-
-# =========================================================
-# 1. LOAD LEMMA MAP (Globalnie)
-# =========================================================
-LEMMA_MAP = {}
-try:
-    with open("lemma_map.json", 'r', encoding='utf-8') as f:
-        LEMMA_MAP = json.load(f)
-    print(f"Loaded Lemma Map: {len(LEMMA_MAP)} entries.")
-except FileNotFoundError:
-    print("Warning: lemma_map.json not found! Hard negative generation will be less effective.")
-
-# =========================================================
-# 2. BUILD REVERSE INDEXES (Dla Configu)
-# =========================================================
-# Reverse Map dla Shared Groups: "man" -> "MALE_HUMAN"
-WORD_TO_SHARED_GROUP = {}
-for group_name, words in SHARED_DEFINITIONS.items():
-    for w in words:
-        WORD_TO_SHARED_GROUP[w] = group_name
-
-# Reverse Map dla Pools: "red" -> "COLORS"
-WORD_TO_POOL_ID = {}
-for pool_name, words in CATEGORY_POOLS.items():
-    for w in words:
-        WORD_TO_POOL_ID[w] = pool_name
-
-# Reverse Number Map
-NUMBERS_REVERSE = {v: k for k, v in NUMBERS_DICT.items()}
-
-
 #SWAP OF NONE NEGATIVES
 ALL_VALID_CONCEPTS = []
 for pool in CATEGORY_POOLS.values():
@@ -89,8 +58,6 @@ ALL_VALID_CONCEPTS = list(set(ALL_VALID_CONCEPTS))
 
 # =========================================================
 # 4. PROTECTED WORDS (STOPLIST)
-# Words that provide structure but are not visual objects.
-# Swapping these usually breaks grammar or meaning too abstractly.
 # =========================================================
 PROTECTED_WORDS = {
     "with", "from", "into", "onto", "over", "under", "next", "near", 
@@ -98,7 +65,7 @@ PROTECTED_WORDS = {
     "been", "being", "have", "has", "doing", "does", "done", "will", "would", 
     "could", "should", "their", "your", "some", "many", "very", "much",
     "background", "foreground", "image", "picture", "photo", "scene", "view",
-    "looking", "standing", "sitting", "wearing", "holding" # High freq verbs often better kept as anchors
+    "looking", "standing", "sitting", "wearing", "holding"
 }
 
 # =========================================================
@@ -108,156 +75,113 @@ POS_MAP = {}
 POS_GROUPS = {}
 
 try:
-    with open("pos_map.json", 'r', encoding='utf-8') as f:
-        POS_MAP = json.load(f)
-        
-    from collections import defaultdict
-    _temp_groups = defaultdict(list)
-    
-    # We filter the POS groups to only include "useful" words
-    # to avoid swapping common words with extremely rare/archaic ones.
-    domain_vocab = set(ALL_VALID_CONCEPTS)
-    
-    for word, pos in POS_MAP.items():
-        # Condition: Must be in our Visual Domain OR length > 3
-        if word in domain_vocab or len(word) > 3: 
-            _temp_groups[pos].append(word)
-            
-    POS_GROUPS = dict(_temp_groups)
-    print(f"Loaded POS Map: {len(POS_MAP)} words. Groups: {list(POS_GROUPS.keys())}")
-
-except FileNotFoundError:
-    print("Warning: pos_map.json not found! Fallback will be random.")
-
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    print("CRITICAL: spaCy model not found. Run: python -m spacy download en_core_web_sm")
+    nlp = None
 
 def create_slightly_negative_caption(caption):
     """
-    Creates a Hard Negative.
-    Priority 1: Logic/Pool swaps (Numbers, Colors, Objects).
-    Priority 2: Smart Fallback (Noun->Visual Noun, Verb->Verb).
+    Creates a Hard Negative with strict morphological inheritance.
+    Prevents sequence-based networks (LSTMs) from detecting grammatical artifacts.
     """
-    if not caption: return None, False
+    if not caption or nlp is None: 
+        return None, False
 
-    raw_tokens = Tok_lib.preprocess_text(caption)
-    if not raw_tokens: return None, False
-
-    # 1. Find High-Quality Candidates (Logic Swaps)
-    candidates = [] 
+    # Process sentence to establish syntax dependencies and exact POS tags
+    doc = nlp(caption)
+    candidates = []
     
-    for i, token in enumerate(raw_tokens):
-        token_lower = token.lower()
-        
-        # Skip Protected words immediately
-        if token_lower in PROTECTED_WORDS: continue
-        
-        lemma = LEMMA_MAP.get(token_lower, token_lower)
+    # 1. Find High-Quality Candidates using contextual lemmas
+    for i, token in enumerate(doc):
+        if token.lower_ in PROTECTED_WORDS or token.is_punct: 
+            continue
+            
+        lemma = token.lemma_.lower()
 
-        # Skip short junk unless it's a number
-        if len(lemma) < 3 and not lemma.isdigit(): continue
-
-        if lemma in NUMBERS_DICT or lemma.isdigit():
-            candidates.append((i, "NUMBER", lemma))
+        # Route to strategies
+        if lemma in NUMBERS_DICT or token.pos_ == "NUM":
+            candidates.append((i, "NUMBER", lemma, token))
         elif lemma in STRICT_PAIRS:
-            candidates.append((i, "STRICT", lemma))
+            candidates.append((i, "STRICT", lemma, token))
         elif lemma in WORD_TO_POOL_ID:
-            candidates.append((i, "POOL", lemma))
+            candidates.append((i, "POOL", lemma, token))
         elif lemma in WORD_TO_SHARED_GROUP:
             source_group = WORD_TO_SHARED_GROUP[lemma]
             if source_group in SHARED_RELATIONS:
-                candidates.append((i, "SHARED", source_group))
+                candidates.append((i, "SHARED", source_group, token))
+        # Dynamic POS Fallback: Rely on spaCy's tags, not the static POS_MAP
+        elif token.pos_ in ["NOUN", "PROPN", "VERB", "ADJ"] and len(lemma) > 3:
+            candidates.append((i, "POS_FALLBACK", token.pos_, token))
 
-    final_tokens = list(raw_tokens) 
+    if not candidates:
+        return None, False
+
+    # 2. Select Targets (Updated for equal 1, 2, or 3 swap probability)
+    desired_swaps = random.choice([1, 2, 3])
+    num_swaps = min(desired_swaps, len(candidates))
+    targets = random.sample(candidates, num_swaps)
+
+    # Convert document to a list of strings preserving original whitespace
+    final_tokens = [t.text_with_ws for t in doc]
     swaps_performed = 0
 
-    # --- STRATEGY 1: KNOWN LOGIC SWAPS (Best Quality) ---
-    if candidates:
-        desired_swaps = random.choices([1, 2], weights=[0.85, 0.15], k=1)[0]
-        num_swaps = min(desired_swaps, len(candidates))
-        random.shuffle(candidates)
-        targets = candidates[:num_swaps]
+    for target_idx, strategy, meta, original_token in targets:
+        new_word_lemma = None
 
-        for target_idx, strategy, meta in targets:
-            new_word_lemma = None
+        # Execute Swap Strategy
+        if strategy == "NUMBER":
+            val = int(meta) if meta.isdigit() else NUMBERS_DICT.get(meta, 1)
+            offset = random.choice([-2, -1, 1, 2])
+            new_val = max(1, val + offset)
+            if new_val == val: new_val += 1
+            new_word_lemma = str(new_val)
 
-            if strategy == "NUMBER":
-                val = int(meta) if meta.isdigit() else NUMBERS_DICT.get(meta, 1)
-                possible_offsets = [-2, -1, 1, 2]
-                offset = random.choice(possible_offsets)
-                new_val = max(1, val + offset)
-                if new_val == val: new_val += 1
-                new_word_lemma = str(new_val) if meta.isdigit() else NUMBERS_REVERSE.get(new_val, str(new_val))
+        elif strategy == "STRICT":
+            new_word_lemma = random.choice(STRICT_PAIRS[meta])
 
-            elif strategy == "STRICT":
-                new_word_lemma = random.choice(STRICT_PAIRS[meta])
+        elif strategy == "POOL":
+            pool_id = WORD_TO_POOL_ID[meta]
+            valid_options = [w for w in CATEGORY_POOLS[pool_id] if w != meta]
+            if valid_options:
+                new_word_lemma = random.choice(valid_options)
 
-            elif strategy == "POOL":
-                pool_id = WORD_TO_POOL_ID[meta]
-                valid_options = [w for w in CATEGORY_POOLS[pool_id] if w != meta]
-                if valid_options:
-                    new_word_lemma = random.choice(valid_options)
+        elif strategy == "SHARED":
+            target_group_name = SHARED_RELATIONS[meta]
+            if target_group_name in SHARED_DEFINITIONS:
+                new_word_lemma = random.choice(SHARED_DEFINITIONS[target_group_name])
+                
+        elif strategy == "POS_FALLBACK":
+            if meta in ["NOUN", "PROPN"] and random.random() < 0.8:
+                if ALL_VALID_CONCEPTS:
+                    new_word_lemma = random.choice(ALL_VALID_CONCEPTS)
+            elif meta in POS_GROUPS and POS_GROUPS[meta]:
+                new_word_lemma = random.choice(POS_GROUPS[meta])
 
-            elif strategy == "SHARED":
-                target_group_name = SHARED_RELATIONS[meta]
-                if target_group_name in SHARED_DEFINITIONS:
-                    new_word_lemma = random.choice(SHARED_DEFINITIONS[target_group_name])
+        # 3. Morphological Inheritance & String Reconstruction
+        if new_word_lemma:
+            # Use module-level getInflection to inflect the new word to match the old word's tag
+            inflected_tuple = pyinflect.getInflection(new_word_lemma, original_token.tag_)
+            
+            # Extract the first valid inflection, or fallback to the raw lemma if unavailable
+            final_word = inflected_tuple[0] if inflected_tuple else new_word_lemma
+            
+            # Inherit capitalization structure
+            if original_token.is_title:
+                final_word = final_word.title()
+            elif original_token.is_upper:
+                final_word = final_word.upper()
+                
+            # Reconstruct string, maintaining natural spacing
+            ws = original_token.whitespace_
+            final_tokens[target_idx] = final_word + ws
+            swaps_performed += 1
 
-            if new_word_lemma:
-                final_tokens[target_idx] = new_word_lemma
-                swaps_performed += 1
-
-    # =========================================================
-    # STRATEGY 2: NATURAL FALLBACK (POS & Visual Aware)
-    # =========================================================
     if swaps_performed == 0:
-        # Filter indices: Length > 3 AND Not Protected
-        possible_indices = [
-            idx for idx, t in enumerate(raw_tokens) 
-            if len(t) > 3 and t.lower() not in PROTECTED_WORDS
-        ]
-        
-        if not possible_indices:
-            # Last resort: Try length > 2 if strict filter failed
-            possible_indices = [idx for idx, t in enumerate(raw_tokens) if len(t) > 2]
-    
-        # Try up to 5 times to find a valid POS swap
-        for _ in range(5):
-            if not possible_indices: break
-            
-            target_idx = random.choice(possible_indices)
-            original_word = final_tokens[target_idx].lower()
-            original_pos = POS_MAP.get(original_word)
-            
-            replacement = None
+        return None, False
 
-            # -----------------------------------------------
-            # Case A: It's a NOUN (The most critical swap)
-            # -----------------------------------------------
-            if original_pos in ["NOUN", "PROPN"]:
-                # Preference: Swap with a VISUAL CONCEPT (from your Pools)
-                # This turns "A man with a [hammer]" -> "A man with a [banana]"
-                # Instead of "A man with a [situation]" (Abstract noun)
-                if random.random() < 0.8: # 80% chance to force visual object
-                    replacement = random.choice(ALL_VALID_CONCEPTS)
-                else:
-                    # 20% chance for general noun from POS map
-                    if original_pos in POS_GROUPS:
-                        replacement = random.choice(POS_GROUPS[original_pos])
-
-            # -----------------------------------------------
-            # Case B: It's a VERB or ADJECTIVE
-            # -----------------------------------------------
-            elif original_pos in ["VERB", "ADJ"] and original_pos in POS_GROUPS:
-                replacement = random.choice(POS_GROUPS[original_pos])
-
-            # -----------------------------------------------
-            # Apply Swap if valid
-            # -----------------------------------------------
-            if replacement and replacement != original_word:
-                final_tokens[target_idx] = replacement
-                swaps_performed += 1
-                break
-            
-    return " ".join(final_tokens), (swaps_performed > 0)
+    # Join the array back into a continuous string
+    return "".join(final_tokens).strip(), True
 
 
 

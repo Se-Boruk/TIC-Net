@@ -172,8 +172,8 @@ print("Backbone frozen for initial warm-up (Head-only training).")
 
 
 criterion = functions.Custom_loss(margin = LOSS_MARGIN,
-                                  triplet_weight = 2.0, 
-                                  contrastive_weight = 1.5,
+                                  triplet_weight = 3, 
+                                  contrastive_weight = 1.0,
                                   init_temp=0.07
                                   )
 
@@ -184,7 +184,7 @@ params_to_optimize = list(model.parameters()) + list(criterion.parameters())
 optimizer = optim.AdamW(params_to_optimize,
                         lr=LR,
                         betas=(0.9, 0.98),
-                        weight_decay=0.05, # Zwiększony weight decay dla stabilności ResNetu    
+                        weight_decay=0.04, # Zwiększony weight decay dla stabilności ResNetu    
                         eps=1e-8
                     )
 
@@ -301,13 +301,18 @@ for e in range(EPOCHS):
             batch_caption_n = batch['caption_negative']
     
             with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
-                v_main, v_aug, t_pos, t_neg = model(batch_image, batch_image_aug, batch_caption_p, batch_caption_n)
+                # FIXED: Unpack 6 values including masks
+                v_main, v_aug, t_pos, t_neg, m_pos, m_neg = model(batch_image, batch_image_aug, batch_caption_p, batch_caption_n)
                 
-                # Zbieranie wyników do kalibracji
-                train_pos_scores.append((v_main * t_pos).sum(dim=1).detach().cpu())
-                train_neg_scores.append((v_main * t_neg).sum(dim=1).detach().cpu())
+                # FIXED: Use cross-attention calculation for calibration scores
+                score_pos = criterion._get_paired_similarity(v_main, t_pos, m_pos)
+                score_neg = criterion._get_paired_similarity(v_main, t_neg, m_neg)
+                
+                train_pos_scores.append(score_pos.detach().cpu())
+                train_neg_scores.append(score_neg.detach().cpu())
     
-                loss = criterion(v_main, v_aug, t_pos, t_neg) / accumulation_steps
+                # FIXED: Pass masks to criterion
+                loss = criterion(v_main, v_aug, t_pos, t_neg, m_pos, m_neg) / accumulation_steps
     
             scaler.scale(loss).backward()
             c += 1
@@ -331,7 +336,7 @@ for e in range(EPOCHS):
             pbar.update(1)
             pbar.set_postfix({"loss": f"{current_loss:.4f}", "lr": f"{optimizer.param_groups[0]['lr']:.2e}"})
 
-    # Konwersja wyników treningowych do metryk (bez kalibracji tutaj)
+    # Konwersja wyników treningowych do metryk
     train_pos_scores = torch.cat(train_pos_scores).numpy()
     train_neg_scores = torch.cat(train_neg_scores).numpy()
     avg_train_loss = train_epoch_loss / num_train_batches
@@ -342,7 +347,6 @@ for e in range(EPOCHS):
     model.eval()
     model.eval_mode()
     val_loader.start_epoch(shuffle=False)
-    
     
     val_epoch_loss = 0.0
     val_pos_scores = []
@@ -356,20 +360,22 @@ for e in range(EPOCHS):
                 if batch is None: break
             
                 img_original = batch['image_original']
-                
-                # JEŚLI brak augmentacji, użyj oryginału jako "augmentacji"
-                # To bezpieczne i poprawne dla liczenia lossa w walidacji
                 img_augmented = batch.get('image_augmented', img_original)
     
                 with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
-                    # Podajemy img_original w obu miejscach
-                    v_m, v_a, t_p, t_n = model(img_original, img_augmented, 
-                                               batch['caption_positive'], batch['caption_negative'])
+                    # FIXED: Unpack 6 values including masks
+                    v_m, v_a, t_p, t_n, m_p, m_n = model(img_original, img_augmented, 
+                                                         batch['caption_positive'], batch['caption_negative'])
                     
-                    loss = criterion(v_m, v_a, t_p, t_n)
+                    # FIXED: Pass masks to criterion
+                    loss = criterion(v_m, v_a, t_p, t_n, m_p, m_n)
                     
-                    val_pos_scores.append((v_m * t_p).sum(dim=1).cpu())
-                    val_neg_scores.append((v_m * t_n).sum(dim=1).cpu())
+                    # FIXED: Use cross-attention calculation for validation scores
+                    score_pos = criterion._get_paired_similarity(v_m, t_p, m_p)
+                    score_neg = criterion._get_paired_similarity(v_m, t_n, m_n)
+                    
+                    val_pos_scores.append(score_pos.cpu())
+                    val_neg_scores.append(score_neg.cpu())
 
                 val_epoch_loss += loss.item()
                 pbar_val.update(1)
@@ -380,7 +386,6 @@ for e in range(EPOCHS):
     # --- KLUCZOWA ZMIANA: Kalibracja na VAL ---
     current_threshold = functions.calibrate_threshold(val_pos_scores, val_neg_scores)
     
-    # Przeliczamy metryki używając progu z Walidacji dla obu zbiorów
     t_b_acc, t_recall, t_spec = functions.calculate_metrics(train_pos_scores, train_neg_scores, current_threshold)
     v_b_acc, v_recall, v_spec = functions.calculate_metrics(val_pos_scores, val_neg_scores, current_threshold)
     
