@@ -47,11 +47,11 @@ The captions used were the standard ones (coco & flickr30k) but additional ones 
 First and basic one is just using other examples in the batch as negative samples. It is technique known as contrastive learning.
 
 #### Contrastive learning example. Loss function makes dot products of diagonal (positive samples) bigger, while making the rest of the matrix dot products smaller
-<img src="https://github.com/Se-Boruk/AoC_project/blob/master/Visuals/SVM_full_scores.png?raw=true" width="640">
+<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Assets/Contrastive_learnin_example.png?raw=true" width="520">
 
 Second one involved algorithmical creation of the negative samples by swapping words in the sentence.<br>
 It has been done this way to ensure that the model is also sensitive to small mismatches in the descriptions, e.g.<br>
-"There is red **apple** laying on the table" != "There is **green** apple laying on the table"<br>
+"There is **red** apple laying on the table" != "There is **green** apple laying on the table"<br>
 
 To ensure correct and diverse word swaps, the "spacy" module was used. It is NLP tool which allows for basic identification and manipulation on text data. It's excellent for lightweight analysis and word swaps while ensuring we are swapping only matching context words.<br>
 
@@ -65,3 +65,44 @@ Also the images has been augmented to generalize model training.<br>
 Used techniques involved color jittering, cropping, grayscaling or blurring.
 
 ### It is important to note that both text negative examples and image augmentation were done dynamically during the training
+
+#### Examples of produced training samples
+<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Assets/Data_visualisation_1.png?raw=true" width="640">
+
+
+## Architectures & Training
+
+### Architecture
+Final Model is variation of Siameese Network.<br>
+In one branch it has CNN (with ResNet50 pretrained backbone) and on the other one there is modified LSTM.
+
+Both of the network are producing vectors containing informations about the text and image contents. Then the cosine similarity is calculated to determine if the text describes the image well. If it is above given threshold, then 2 samples are classified as match. If not then as mismatch.
+
+#### Architecture scheme
+<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Assets/Contrastive_learnin_example.png?raw=true" width="520">
+
+### Training course
+Training used already combined triplet loss function (for hard negatives) and contrastive loss (for general knowledge).
+
+The training techniques used include half-precision to reduce computational overhead, gradient accumulation for artificially increasing batch size (important for contrastive loss)
+
+#### Training over the epochs. Metrics included
+<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Plots/metrics_over_training.png?raw=true" width="640">
+
+At the end of the training the analysis of the best threshold has been performed on isolated local test set, to prepare model for the real test set.
+
+#### Best threshold analysis
+<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Plots/Threshold_Analysis_best_model.png?raw=true" width="640">
+
+## Results
+
+To describe final results - what scores the model achieved and overal conclusion :)
+
+
+
+
+
+
+
+
+
