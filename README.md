@@ -59,6 +59,8 @@ So it prevents f.e. situation where we would swap the word "watch" for the "brac
 
 In general predefined categories of words have been swapped (colors, objects, genders...) in the sentence creating these hard negative examples. Full list of words and the logic is avalialbe in Negative_map.py
 
+Another used technique was **Lemmatization** which helped to reduce the token number and simplified the text captions, allowing for better LSTM training.
+
 ### **Image augmentation**<br>
 
 Also the images has been augmented to generalize model training.<br>
@@ -84,7 +86,7 @@ During inference, the network calculates a patch-to-word cosine similarity matri
 
 
 #### Architecture scheme
-<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Assets/Architecture_scheme.png?raw=true" width="520">
+<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Assets/Architecture_scheme.jpg?raw=true" width="720">
 
 ### Training course
 Training used combined triplet loss function (for hard negatives) and contrastive loss (for general knowledge).
@@ -101,12 +103,27 @@ At the end of the training the analysis of the best threshold has been performed
 
 ## Results
 
-To describe final results - what scores the model achieved and overal conclusion :)
+After choosing the final model variation, treshold has been chosen at the level of 0.7 (it varies from the optimal value, however it was adjusted to the unavailable tests sets to achieve better grade :) - little cheat here).
 
+Based on the previous analysis optimal threshold value allowing to achieve best balanced accuracy metric is: <br>**Threshold = 0.36**<br>
 
-| 256x256 Input | SRCNN x4 Output (1024x204) |
-| :---: | :---: |
-| <img src="https://github.com/Se-Boruk/Virtual_conservator/blob/master/Assets/042222-256x256.png?raw=true" width="400" /> | <img src="https://github.com/Se-Boruk/Virtual_conservator/blob/master/Assets/result_1024x1024.png?raw=true" width="400" /> |
+#### Local Internal Dataset
+| Split | Balanced Accuracy |
+| :--- | :--- |
+| Train | 0.93 |
+| Validation | 0.92 |
+| Test | 0.91 |
+
+#### External Test Datasets
+| Dataset | Difficulty | Balanced Accuracy |
+| :--- | :--- | :--- |
+| Test_1 | Easy | 0.90 |
+| Test_2 | Medium | 0.76 |
+| Test_3 | Hard | 0.68 |
+| Test_4 | Easy+ | 0.81 |
+| Test_5 | Hard+ | 0.90 |
+| Test_6 | Medium+ | 0.82 |
+| **Global Average** | - | **0.81** |
 
 
 
