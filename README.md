@@ -1,5 +1,5 @@
 ﻿# TIC-Net: Text-Image Consistencty Network
-<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Assets/Dog_img.png?raw=true" width="520">
+<img src="https://github.com/Se-Boruk/TIC-Net/blob/master/Assets/Dog_img.png?raw=true" width="520">
 
 This project was part of the Artificial Intelligence & Machine Learning course.
 
@@ -47,7 +47,8 @@ The captions used were the standard ones (coco & flickr30k) but additional ones 
 First and basic one is just using other examples in the batch as negative samples. It is technique known as contrastive learning.
 
 #### Contrastive learning example. Loss function makes dot products of diagonal (positive samples) bigger, while making the rest of the matrix dot products smaller
-<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Assets/Contrastive_learning_example.png?raw=true" width="520">
+
+<img src="https://github.com/Se-Boruk/TIC-Net/blob/master/Assets/Contrastive_learning_example.png?raw=true" width="520">
 
 Second one involved algorithmical creation of the negative samples by swapping words in the sentence.<br>
 It has been done this way to ensure that the model is also sensitive to small mismatches in the descriptions, e.g.<br>
@@ -69,7 +70,7 @@ Used techniques involved color jittering, cropping, grayscaling or blurring.
 ### It is important to note that both text negative examples and image augmentation were done dynamically during the training
 
 #### Examples of produced training samples
-<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Assets/Data_visualisation_1.png?raw=true" width="720">
+<img src="https://github.com/Se-Boruk/TIC-Net/blob/master/Assets/Data_visualisation_1.png?raw=true" width="720">
 
 
 ## Architectures & Training
@@ -86,7 +87,7 @@ During inference, the network calculates a patch-to-word cosine similarity matri
 
 
 #### Architecture scheme
-<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Assets/Architecture_scheme.jpg?raw=true" width="720">
+<img src="https://github.com/Se-Boruk/TIC-Net/blob/master/Assets/Architecture_scheme.jpg?raw=true" width="720">
 
 ### Training course
 Training used combined triplet loss function (for hard negatives) and contrastive loss (for general knowledge).
@@ -94,12 +95,12 @@ Training used combined triplet loss function (for hard negatives) and contrastiv
 The training techniques used include half-precision to reduce computational overhead, gradient accumulation for artificially increasing batch size (important for contrastive loss)
 
 #### Training over the epochs. Metrics included
-<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Plots/metrics_over_training.png?raw=true" width="640">
+<img src="https://github.com/Se-Boruk/TIC-Net/blob/master/Plots/metrics_over_training.png?raw=true" width="640">
 
 At the end of the training the analysis of the best threshold has been performed on isolated local test set, to prepare model for the real test set.
 
 #### Best threshold analysis
-<img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Plots/Threshold_Analysis_best_model.png?raw=true" width="640">
+<img src="https://github.com/Se-Boruk/TIC-Net/blob/master/Plots/Threshold_Analysis_best_model.png?raw=true" width="640">
 
 ## Results
 
