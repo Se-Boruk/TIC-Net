@@ -1,4 +1,4 @@
-﻿# Image & Text consistency - Project
+﻿# TIC-Net: Text-Image Consistencty Network
 <img src="https://github.com/Se-Boruk/Image_Text_Consistency_Project/blob/master/Assets/Dog_img.png?raw=true" width="520">
 
 This project was part of the Artificial Intelligence & Machine Learning course.
